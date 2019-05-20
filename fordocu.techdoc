@@ -1,0 +1,174 @@
+Grofste structuur van fordocu:
+==============================
+
++ Het hoofdprogramma bestaat enkel uit een aanroep naar de subroutine 'main'.
+  Dat is vrij simpel.
++ De subroutine 'main' doet het volgende:
+  + enkele malen ('runs_to_do') wordt alles gedaan:
+     + Maak informatie klaar op basis van mogelijk reeds bestaande
+       uitvoer-files:
+        'readComments': woordenboekje 'commments.xml'    en
+        'prepareTrees': structuur van fortran-dingen onderling
+     + Lees de command line arguments:
+        + pas settings-variabelen aan als het argument een optie is
+        + lees en verwerk de file(s) als het argument een filenaam/filenamen is:
+                        'process_file'
+     + Verwerk de verzamelde informatie tot het woordenboekje 'comments.xml' en
+       maak de treelog-files af (structuur van fortran-dingen onderling)
+  + 'externals_to_html': Kopieer alle plaatjes etc. naar
+                         de HTML uitvoer-directory
+    maak HTML-files met calltrees etc ('tree2html')
+
+
+Inzoomen: main >> process_file
+==============================
+De meest interessante functie (zeker voor de bugs waar we nu nog mee kampen) is
+'process_file'. Deze is zelf vrij simpel:
+  + Vergelijk het opgegeven formaat ('free' of 'fixed') met wat de computer
+    vindt: foutmelding als het niet klopt;
+  + Loopje over de gescheiden onderdelen (subroutines, modules, etc)
+    van de file:
+    + lees het onderdeel    'read_file'
+    + verwerk alle commentaar in het woordenboekje 'comments.xml'
+                                                   'handle_comments'
+    + schrijf uitvoerfile(s):
+       + pseudocode    'do_dump_pseudocode'  en/of
+       + html          'toplevel2html'       en/of
+       + nieuwe source 'toplevel2header'           (maar alleen als je de invoer
+                                                    wilt splitsen)
+    + Als je de invoer NIET wilt splitsen, kan de nieuwe source pas na het
+      loopje worden geschreven.     'delayed_write'
+
+Voor de huidige bugs zijn eigenlijk alleen 'read_file' en 'delayed_write' van
+belang.
+
+
+Inzoomen: main >> process_file >> read_file
+===========================================
+
++ We lezen steeds een statement (regel fortran code) met 'read_stmt', totdat er 
+  niets meer uit komt.  De 'top-level' statements worden samengevoegd, in het
+  array 'top'.
+
+  Elk statement wordt weergegeven door middel van een struct, met daarin
+  allerlei informatie, zoals zijn regelnummer, maar ook, voor een
+  subroutine-statement bijvoorbeeld, alle variabelen die worden gedeclareerd in
+  de subroutine.
+
+  TOP-LEVEL STATEMENTS:
+  + Als een statement nergens in zit, is het een top-level statement.
+    Voorbeeld: de regel 'Program test' is een top-level statement ook 'module
+               utils', maar 'subroutine calc' alleen als de subroutine calc
+               niet in een module zit en ook niet als contained subroutine in
+               een program/function/subroutine.
+   Omdat het struct dat het top-level statement weergeeft verwijzingen bevat
+   naar alles wat in het top-level statement zit, heb je dus 'alles' wanneer je
+   de top-level statements hebt.
+   Top-level statements heetten 'gescheiden onderdelen' in de vorige paragraaf 
+   (die over process_file).
+
+Voor de werking van 'read_file' is eigenlijk alleen 'read_stmt' van belang.
+
+Inzoomen: main >> process_file >> read_file >> read_stmt
+========================================================
+Read_stmt doet het volgende:
+  + lees een volledige 'zin' compileerbare text. Een 'zin' kan uit meerdere
+    regels bestaan, zoals
+         x = 3
+        &    + 8
+       (fixed)
+
+         x = 3 &    ! uitleg
+             + 8
+       (free)
+
+    Sla alle commentaar die je tegen komt op in de commentaar-administratie.
+
+    Dit wordt gedaan door 'read_line'.
+
+    Deze functie zit in f90fileio.pm, en vult dus de commentaar-admninistratie.
+    De commentaar-administratie wil ik graag sterk gaan verbeteren, en daar
+    staat hieronder een beetje uitleg over.
+
+  + Als het nu verzamelde commentaar nog betrekking heeft op de vorige regel
+    (omdat bij functies, programs en subroutines de uitleg vaak op de volgende
+    regels staat), wordt dat commentaar toegevoegd aan het vorige statement.
+
+  + Het 'soort' regel wordt gedetermineerd. Vooral de regels die in de 'header'
+    (i.e. niet de 'body') staan, worden geclassificeerd: bijvoorbeeld
+    'variabele-declaratie', 'implicit none', 'data statement', 'common block
+    definitie', etc.
+
+    Van body-regels wordt alleen gecontroleerd of er functie/subroutine
+    aanroepen in staan:
+       'classify_line'
+
+  + De regel wordt verwerkt tot een struct met daarin alle relevante
+    informatie, waaronder het bijbehorende commentaar.
+                  '&$process_sub'
+
+    NB: nog niet alle regels worden verwerkt tot een struct, en niet alle
+        structs worden nog opgeslagen. Ik stel voor dat we dat omwille van de
+        uniformiteit wel gaan doen. Dan hoef je ook niet meer twee dingen als
+        uitvoer te geven (een statement-struct en een string waarin staat wat
+        het voor een statement was), omdat je in $struct->{type} altijd kunt
+        lezen wat het voor ding was (wat nu $stmt heet).
+
+De routines '&$process_sub' zijn vrij simpel, dus die hoeven hier niet te
+worden uitgelegd.
+
+
+Inzoomen: main >> process_file >> read_file >> read_stmt >> read_line
+=====================================================================
+De subroutine read_line is zelf niet zo van belang, maar hij roept aan de
+subroutine addto_comments. Het commentaar wordt nu opgeslagen in
+    @collected_comments,
+een array met regels commentaar, met voor elke regel de volgende eigenschappen:
+    line : volledige regel (commentaar + code?, eventueel '\nEMPTY_LINE\n')
+    comment_is_eoln : op de regel staat nog code voor het commentaar (1) of
+                      niet (0)
+
+Deze administratie wordt enkel benaderd via de functies 
+   + hashed_comments
+   + after_comments
+
+De uitvoer van 'hashed_comments' zal dan bestaan uit een struct met de velden:
+   + collected_comments : 
+       een array met voor iedere regel (commentaar) een struct, bestaande uit
+       de volgende velden: 
+
+           after_the_line  : deze commentaarregel kwam na de code-regel ja (1)
+                             nee(0)
+           line            : de hele regel (code + commentaar)
+           comment_is_eoln : op de regel staat nog code voor het commentaar (1) of
+                             niet (0)
+
+   + macro_data : 
+     data - dingen die zijn gedefinieerd. Dit laten we even buiten beschouwing.
+
+Deze velden worden toegevoegd aan de structs die de uitvoer zijn van read_stmt.
+De structs die de statements weergeven kunnen worden weergegeven met de 
+functie 
+
+Inzoomen: main >> process_file >> toplevel2html
+===============================================
+Deze functie verwerkt alles dat is uitgezocht over een top-level statement in 
+html-pagina's. 
+Hij doet de volgende stappen: 
+
+   + eerst de subroutine push_context. Wat dat is weten we (nog) niet. Mocht
+     dit van belang blijken, dan zoeken we dat uit en schrijven de bevindingen hier. 
+
+   + een naam $htmlfile wordt gekozen voor de html-files
+
+   + Extra informatie over het top-level statement wordt verzameld (add_info_to_top).
+     Deze informatie wordt aan $top toegevoegd.
+
+   + Nu wordt een lijst gemaakt van de tab-bladen die gemaakt moeten worden
+     voor dit object: een deelverzameling van
+       {'Header', 'Version history', 'Types', 'Subroutines called', 'Variables',
+        'Includes', 'Interfaces', 'Contained', 'Called by', 'Source'}.
+
+   + Hierna wordt elk van de te maken tabs gemaakt (make_tab_page)
+
+

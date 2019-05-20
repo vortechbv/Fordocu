@@ -1,0 +1,11 @@
+Fordocu is a documentation generating tool for Fortran source files. This
+application is developed by VORtech acting upon instructions from 'Planbureau
+voor de Leefomgeving' (PBL). Fordocu is inspired by the open source codes
+F90doc and Doxygen.
+
+If you have questions about the source of Fordocu you can contact VORtech.
+
+VORtech : http://www.vortech.nl
+PBL     : http://www.planbureauvoordeleefomgeving.nl
+doxygen : http://www.doxygen.org
+f90doc  : http://erikdemaine.org/software/f90doc/
